@@ -1,0 +1,188 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Nikhil Dubey"
+date: "22/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Introduction 
+  
+Using devices such as Jawbone Up, Nike FuelBand and Fitbit, it is now possible to obtain a vast amount of personal activity data relatively cheaply. These types of devices are part of quantified self-movement — a community of enthusiasts who take measurements about themselves frequently to enhance their wellbeing, to find trends in their behaviour, or because they are tech geeks. One thing people do routinely is measure how much of a single task they do, but they rarely measure how well they do it.
+  
+The purpose of this project would be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+
+##Question
+
+According to the aforementioned report, "Six young health participants were asked to perform a sequence of 10 replicas of the Unilateral Dumbbell Biceps Curl in five different ways: precisely in accordance with the criteria (Class A), by throwing the elbows at the front (Class B), by raising the halfway dumbbell (Class C), by lowering the halfway dumbbell (Class D) and by throwing the hips at the front.
+Class A refers to the execution of the exercise, while the other four sections correspond to typical errors.
+Our goal is to anticipate the way they did the exercise.
+
+##Objective of assignment
+
+1. Predicting the way the participants did the exercise. Please refer to the "class" variable in the training package. All other variables may be used as predictors.
+
+2. Show how the model was developed, cross validation performed, and the expectation of the error of the sample and the reasons for the choices made.
+
+3. Using the predictive model to forecast 20 separate test cases.
+
+### Retrive and cleaning Data 
+
+This original source is the data for this project: http:/groupware.les.inf.puc-rio.br / har.
+
+```{r}
+library(data.table) #loading of the downloaded package data.table
+library(mlbench) #loading of the downloaded package mlbench
+library(caret) #loading of the downloaded package caret
+library(klaR) #loading of the downloaded package klaR
+library(randomForest) #loading of the downloaded package randomForest
+library(rattle) #loading of the downloaded package rattle
+library(rpart) #loading of the downloaded package rpart
+library(rpart.plot) #loading of the downloaded package rpart.plot
+```
+
+The training data for this project are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+ 
+##Preparation of Datasets
+
+```{r}
+Training_Data <- fread("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", header=T, na.strings=c("NA","#DIV/0!","")) #creating variable for storing Traning Data
+Testing_Data <- fread("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", header=T, na.strings=c("NA","#DIV/0!","")) #creating variable for storing testing data
+dim(Training_Data)
+dim(Testing_Data)
+```
+
+"Now, we use the" Summary(Training_Data) "and" str(Training_Data) "commands to look at the data and, as we have 160 columns, we extract the names of the columns.
+We don't include the outputs of "summary" and "str" as these commands retrieve a lot of rows, but we think it's useful to know a list of names.
+
+```{r}
+names(Training_Data)
+```
+
+Thus, we have many columns with "NA" values, and several columns also contain steps that are not relevant to us at this time (we want belt, arm and forearm variables).
+The next step, then, is to create a subset of data with parameters that are of interest to me and add the "result" column.
+The first thing to do would be to use "sapply" on the TrainingData and delete all NA or null variables, and then use the list to subset the main data set.
+
+```{r}
+List_Na <- sapply(Training_Data, function (x) any(is.na(x)))
+newTraining_Data <- subset(Training_Data, select=c("classe", names(List_Na)[!List_Na & grepl("belt|[^(fore)]arm|dumbbell|forearm", names(List_Na))]))
+```
+
+Then we'll have to convert the class to the Factor data type, so that the caret produces a classification rather than a regression model.
+
+```{r}
+newTraining_Data <- newTraining_Data[, classe := factor(newTraining_Data[, classe])]
+newTraining_Data[, .N, classe]
+```
+
+Lastly, we would split the training data data into two batches, 60 percent training data and 40 percent test data.
+60 percent of the training data set as training and the rest for validation are divided. Once the best model is found, the original research data set will be checked.
+
+```{r}
+inn_Train <- createDataPartition(newTraining_Data$classe, p=0.6, list=FALSE)
+Training_data <- newTraining_Data[inn_Train, ]
+Testing_data <- newTraining_Data[-inn_Train, ]
+```
+
+Then we search whether there are near-zero variance predictors in the batch.
+
+```{r}
+nzv <- nearZeroVar(Training_data, saveMetrics=TRUE)
+nzv
+```
+
+We don't have any predictors with a near-zero variance so we can continue with the construction of our model.
+
+##Building Model
+
+To suit the model to the data, we use the "train" function and the partial least square discriminant analysis (PLSDA) model to start.
+
+```{r}
+set.seed(12345)
+ctrl <- trainControl(method = "repeatedcv", repeats = 3, classProbs = TRUE, summaryFunction = defaultSummary)
+plsFit <- train(classe ~ ., data = Training_data, method = "pls", tuneLength = 15, trControl = ctrl, metric = "ROC", preProc = c("center","scale"))
+plsFit
+```
+
+The grid of results for this output is the average re-sampled estimates of efficiency.
+We use "predict" on our test data to implement the model.
+
+```{r}
+plsClass <- predict(plsFit, newdata = Testing_data)
+str(plsClass)
+```
+
+We can also calculate this using the option type = "prob" to calculate the probabilities of the model class.
+
+```{r}
+plsProb <- predict(plsFit, newdata = Testing_data, type = "prob")
+head(plsProb)
+```
+
+#We use a plot to display the result in the best manner.
+
+```{r}
+trellis.par.set(caretTheme())
+plot(plsFit, metric = "Kappa")
+```
+
+The graph shows the connection between the number of components of the PLS and the calculation of the area under the ROC curve.
+And then, in the end, We looked at the matrix of uncertainty and related statistics.
+
+#We can also apply another model like the "regularized discriminant analysis" model
+
+```{r}
+set.seed(123)
+rdaFit <- train(classe ~ ., data = Training_data, method = "rda", tuneGrid = data.frame(gamma = (0:4)/4, lambda = 3/4), trControl = ctrl, metric = "ROC")
+rdaFit
+rdaClasses <- predict(rdaFit, newdata = Testing_data)
+confusionMatrix(rdaClasses, Testing_data$classe)
+```
+
+#and see how these two models (pls, rda) distinguish in terms of their resampling results.
+
+```{r}
+resamps <- resamples(list(pls = plsFit, rda = rdaFit))
+summary(resamps) 
+diffs <- diff(resamps)
+summary(diffs)
+```
+
+#And then a plot to visualise the result
+
+```{r}
+xyplot(resamps, what = "BlandAltman")
+```
+
+#We can now also try the "Random Forest" model:
+
+In random forests, to achieve an unbiased estimation of the test set error, there is no need for cross-validation or a separate test set. It is calculated internally, during the execution process. The testing of the model (Random Forest) is then carried out using the training data set.
+
+```{r}
+rfFit <- train(classe~., data=Training_data, method="rf",  tuneGrid=expand.grid(.mtry=sqrt(ncol(Training_data[,2:53]))), trControl=ctrl)
+rfFit
+rfClasses <- predict(rfFit, newdata = Testing_data)
+confusionMatrix(rfClasses, Testing_data$classe)
+```
+
+The accuracy of this model is 99.5%.
+We look carefully at the final model and we can isolate the variables that make up the model and see the confusion matrix of this model with the class.error. The error of the class is < 1%.
+
+```{r}
+varImp(rfFit)
+rfFit$finalModel
+```
+
+## Conclusion:
+
+#Now We can also try to use this model on our original testing batch of data and thus :
+```{r}
+Testing_Result <- predict(rfFit, newdata=Testing_Data)
+Testing_Result
+```
